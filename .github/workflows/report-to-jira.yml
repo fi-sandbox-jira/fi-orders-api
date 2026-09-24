@@ -1,7 +1,12 @@
-# Builds/Deployments API body shape is NOT confirmed by a live call yet - see
-# github/CLAUDE.md, "Builds/Deployments API — не проверен живым вызовом".
-# Fix this comment (and the body below, if it turns out wrong) the first time
-# this workflow actually runs against a real issue key.
+# Builds API auth: OAuth 2.0 2LO (client credentials), confirmed live
+# 2026-09-24 - see github/CLAUDE.md, "OAuth для Builds API". Basic auth with
+# email+API-token does NOT work here regardless of scope - don't revert this
+# to secrets.JIRA_AUTOMATION_EMAIL/TOKEN.
+#
+# JIRA_OAUTH_CLIENT_ID/JIRA_OAUTH_CLIENT_SECRET come from Jira's own
+# Settings -> Apps -> OAuth credentials (deep link: /secure/admin/oauth-credentials),
+# NOT from an app registered on developer.atlassian.com - that path authenticates
+# fine but gets 403 "Provider not installed" (see CLAUDE.md for the full story).
 name: Report to Jira
 
 on:
@@ -29,14 +34,26 @@ jobs:
             echo "found=true" >> "$GITHUB_OUTPUT"
             echo "key=$KEY" >> "$GITHUB_OUTPUT"
           fi
+      - name: Get OAuth access token
+        if: steps.find.outputs.found == 'true'
+        id: token
+        env:
+          CLIENT_ID: ${{ secrets.JIRA_OAUTH_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.JIRA_OAUTH_CLIENT_SECRET }}
+        run: |
+          RESPONSE=$(curl -sf -X POST "https://api.atlassian.com/oauth/token" \
+            -H "Content-Type: application/json" \
+            -d "{\"audience\":\"api.atlassian.com\",\"grant_type\":\"client_credentials\",\"client_id\":\"$CLIENT_ID\",\"client_secret\":\"$CLIENT_SECRET\"}")
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+          echo "::add-mask::$ACCESS_TOKEN"
+          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
       - name: Report build to Jira
         if: steps.find.outputs.found == 'true'
         env:
-          JIRA_EMAIL: ${{ secrets.JIRA_AUTOMATION_EMAIL }}
-          JIRA_TOKEN: ${{ secrets.JIRA_AUTOMATION_TOKEN }}
+          ACCESS_TOKEN: ${{ steps.token.outputs.access_token }}
           ISSUE_KEY: ${{ steps.find.outputs.key }}
         run: |
-          LAST_UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S.000+0000)
+          LAST_UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
           BODY=$(cat <<JSON
           {
             "builds": [
@@ -55,6 +72,6 @@ jobs:
           JSON
           )
           curl -sf -X POST "https://api.atlassian.com/jira/builds/0.1/cloud/bbe05fb8-ed91-43cc-84bc-60e8cb811c80/bulk" \
-            -H "Authorization: Basic $(printf '%s:%s' "$JIRA_EMAIL" "$JIRA_TOKEN" | base64 -w0)" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
             -H "Content-Type: application/json" \
             -d "$BODY"
