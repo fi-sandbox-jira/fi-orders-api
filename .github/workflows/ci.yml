@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --coverage
+      - uses: actions/upload-artifact@v3
+        with:
+          name: coverage-${{ matrix.node-version }}
+          path: coverage/lcov.info
+
+  coverage-comment:
+    needs: build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --coverage
+      - uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+            const t = summary.total;
+            const body = [
+              '## Coverage report',
+              '',
+              '| Metric | Coverage |',
+              '|---|---|',
+              `| Lines | ${t.lines.pct}% |`,
+              `| Statements | ${t.statements.pct}% |`,
+              `| Functions | ${t.functions.pct}% |`,
+              `| Branches | ${t.branches.pct}% |`,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

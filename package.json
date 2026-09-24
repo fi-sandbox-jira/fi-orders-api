@@ -1,0 +1,29 @@
+{
+  "name": "fi-orders-api",
+  "version": "1.0.0",
+  "description": "Orders API — Node.js/Express service, sample repository with high test coverage.",
+  "private": true,
+  "main": "src/app.js",
+  "scripts": {
+    "test": "jest",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "4.17.1"
+  },
+  "devDependencies": {
+    "supertest": "6.1.6",
+    "jest": "27.5.1"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js"
+    ],
+    "coverageReporters": [
+      "text-summary",
+      "lcov",
+      "json-summary"
+    ]
+  }
+}

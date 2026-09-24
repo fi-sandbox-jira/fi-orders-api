@@ -1,0 +1,60 @@
+# Builds/Deployments API body shape is NOT confirmed by a live call yet - see
+# github/CLAUDE.md, "Builds/Deployments API — не проверен живым вызовом".
+# Fix this comment (and the body below, if it turns out wrong) the first time
+# this workflow actually runs against a real issue key.
+name: Report to Jira
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Find issue key
+        id: find
+        env:
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          CANDIDATE="$BRANCH $MESSAGE"
+          KEY=$(echo "$CANDIDATE" | grep -oE '(FALCON41|OTTER41)-[0-9]+' | head -n1 || true)
+          if [ -z "$KEY" ]; then
+            echo "No issue key found in branch '$BRANCH' or commit message - nothing to report (not every push has to be tied to an issue)."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "key=$KEY" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Report build to Jira
+        if: steps.find.outputs.found == 'true'
+        env:
+          JIRA_EMAIL: ${{ secrets.JIRA_AUTOMATION_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_AUTOMATION_TOKEN }}
+          ISSUE_KEY: ${{ steps.find.outputs.key }}
+        run: |
+          LAST_UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S.000+0000)
+          BODY=$(cat <<JSON
+          {
+            "builds": [
+              {
+                "pipelineId": "${{ github.repository }}",
+                "buildNumber": ${{ github.event.workflow_run.run_number }},
+                "updateSequenceNumber": ${{ github.event.workflow_run.run_id }},
+                "displayName": "CI #${{ github.event.workflow_run.run_number }}",
+                "url": "${{ github.event.workflow_run.html_url }}",
+                "state": "successful",
+                "lastUpdated": "$LAST_UPDATED",
+                "issueKeys": ["$ISSUE_KEY"]
+              }
+            ]
+          }
+          JSON
+          )
+          curl -sf -X POST "https://api.atlassian.com/jira/builds/0.1/cloud/bbe05fb8-ed91-43cc-84bc-60e8cb811c80/bulk" \
+            -H "Authorization: Basic $(printf '%s:%s' "$JIRA_EMAIL" "$JIRA_TOKEN" | base64 -w0)" \
+            -H "Content-Type: application/json" \
+            -d "$BODY"
