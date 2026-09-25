@@ -1,0 +1,75 @@
+# Manually-dispatched release pipeline - reports its build straight against a
+# release-tracking issue passed in as an input, instead of scanning the
+# commit/branch/PR for an issue key like report-to-jira.yml does. See
+# github/CLAUDE.md, "Группировка билдов релиза" - this is what lets a monthly
+# release that runs three separate pipelines (library/frontend/backend) show
+# up as three builds under one Jira issue's Development panel.
+#
+# Auth for the Builds API call is the same OAuth 2.0 2LO (client credentials)
+# as report-to-jira.yml - see github/CLAUDE.md, "OAuth для Builds API".
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_key:
+        description: "Jira issue key to report this build against (release-tracking issue, e.g. FALCON41-200)"
+        required: true
+      version:
+        description: "Release version label, for the build's display name only (e.g. 2026-10)"
+        required: false
+        default: ""
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --coverage
+      - name: Get OAuth access token
+        id: token
+        env:
+          CLIENT_ID: ${{ secrets.JIRA_OAUTH_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.JIRA_OAUTH_CLIENT_SECRET }}
+        run: |
+          RESPONSE=$(curl -sf -X POST "https://api.atlassian.com/oauth/token" \
+            -H "Content-Type: application/json" \
+            -d "{\"audience\":\"api.atlassian.com\",\"grant_type\":\"client_credentials\",\"client_id\":\"$CLIENT_ID\",\"client_secret\":\"$CLIENT_SECRET\"}")
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+          echo "::add-mask::$ACCESS_TOKEN"
+          echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+      - name: Report release build to Jira
+        env:
+          ACCESS_TOKEN: ${{ steps.token.outputs.access_token }}
+          ISSUE_KEY: ${{ inputs.issue_key }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          LAST_UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          NAME="${{ github.event.repository.name }}"
+          DISPLAY_NAME="Release ${VERSION:-unversioned} - $NAME"
+          BODY=$(cat <<JSON
+          {
+            "builds": [
+              {
+                "pipelineId": "${{ github.repository }}-release",
+                "buildNumber": ${{ github.run_number }},
+                "updateSequenceNumber": ${{ github.run_id }},
+                "displayName": "$DISPLAY_NAME",
+                "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                "state": "successful",
+                "lastUpdated": "$LAST_UPDATED",
+                "issueKeys": ["$ISSUE_KEY"]
+              }
+            ]
+          }
+          JSON
+          )
+          curl -sf -X POST "https://api.atlassian.com/jira/builds/0.1/cloud/bbe05fb8-ed91-43cc-84bc-60e8cb811c80/bulk" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$BODY"
