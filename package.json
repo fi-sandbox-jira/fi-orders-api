@@ -1,6 +1,6 @@
 {
   "name": "fi-orders-api",
-  "version": "1.0.0",
+  "version": "2026-release-1",
   "description": "Orders API — Node.js/Express service, sample repository with high test coverage.",
   "private": true,
   "main": "src/app.js",
