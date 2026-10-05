@@ -1,0 +1,44 @@
+name: SonarCloud analysis
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sonar:
+    name: Test, coverage and SonarCloud scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with lcov coverage
+        run: npm test -- --coverage --coverageReporters=lcov --coverageDirectory=coverage
+
+      - name: Verify coverage report exists
+        run: |
+          if [ ! -s coverage/lcov.info ]; then
+            echo "::error::Coverage report coverage/lcov.info was not produced"
+            exit 1
+          fi
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
