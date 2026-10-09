@@ -1,6 +1,6 @@
 {
   "name": "fi-orders-api",
-  "version": "2026-release-1",
+  "version": "FALCON41-148",
   "description": "Orders API — Node.js/Express service, sample repository with high test coverage.",
   "private": true,
   "main": "src/app.js",
